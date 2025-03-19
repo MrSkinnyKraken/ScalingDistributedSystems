@@ -1,5 +1,4 @@
 from xmlrpc.server import SimpleXMLRPCServer
-import threading
 import time
 from queue import Queue
 
@@ -10,9 +9,6 @@ class InsultFilterService:
     def __init__(self):
         self.queue = Queue()
         self.filtered_results = []
-        # Start the worker thread to process texts.
-        worker_thread = threading.Thread(target=self.worker, daemon=True)
-        worker_thread.start()
 
     def submit_text(self, text):
         self.queue.put(text)
