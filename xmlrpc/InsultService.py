@@ -4,7 +4,7 @@ import time
 import random
 
 class InsultService:
-    def _init_(self):
+    def __init__(self):
         self.insults = ['stupid', 'lazy', 'ugly', 'smelly', 'dumb', 'slow']
         self.subscribers = []
 
