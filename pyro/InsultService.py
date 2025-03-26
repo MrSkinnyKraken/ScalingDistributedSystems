@@ -1,4 +1,4 @@
-# pyro/insult_service.py
+# pyro/InsultService.py
 import Pyro4
 import time
 import random

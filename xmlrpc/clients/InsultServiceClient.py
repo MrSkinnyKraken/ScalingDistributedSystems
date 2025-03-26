@@ -10,13 +10,12 @@ def main():
     print(proxy.add_insult("You look stupid"))
     
     # Retrieve insults
-    insults = proxy.get_insults()
+    insults = proxy.get_insults() #dynamically this method triggers process_queue to simulate the behaviour of a working queue.
     print("Current insults:")
     for insult in insults:
         print(insult)
     
     # Example: Register as a subscriber.
-    # (Assuming your client implements its own XMLRPC server with a notify method.)
     subscriber_url = "http://localhost:9002"
     print(proxy.register_subscriber(subscriber_url))
 
