@@ -9,7 +9,7 @@ SERVER_URL = "http://localhost:9000"
 # Fixed number of current processes
 NUM_PROCESSES = 10
 # Different total loads to test
-REQUEST_STEPS = [100, 500, 700, 900, 1200]
+REQUEST_STEPS = [100, 500, 700, 900]
 # ─────────────────────────────────────────────────────────────────────────────────────
 
 
