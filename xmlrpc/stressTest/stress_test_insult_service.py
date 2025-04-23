@@ -1,44 +1,69 @@
 import xmlrpc.client
 import multiprocessing
 import time
+import matplotlib.pyplot as plt
 
+# ── Configuration ───────────────────────────────────────────────────────────────────
 # XMLRPC server URL, port 9000 for InsultService
 SERVER_URL = "http://localhost:9000"
-
-# Number of requests and concurrent processes
-NUM_REQUESTS = 500
+# Fixed number of current processes
 NUM_PROCESSES = 10
-
-# Function to send requests
-def send_requests(proc_id):
-    insult_service = xmlrpc.client.ServerProxy(SERVER_URL, allow_none=True)
-    start_time = time.time()
-    
-    for i in range(NUM_REQUESTS // NUM_PROCESSES):
-        insult_service.add_insult(f"Test Insult {i}")
-
-    end_time = time.time()
-    return end_time - start_time  #Return time used (irrelevant, we only use the total time of all the processes)
+# Different total loads to test
+REQUEST_STEPS = [100, 500, 1000, 5000, 10000]
+# ─────────────────────────────────────────────────────────────────────────────────────
 
 
-def stress_test_insult_service():
-    print(f"Starting stress test with {NUM_PROCESSES} processes and {NUM_REQUESTS} total requests...")
+def send_requests(args):
+    """
+    Worker function: each process will send 'reqs' requests to the service.
+    """
+    url, reqs = args
+    proxy = xmlrpc.client.ServerProxy(url, allow_none=True)
+    for i in range(reqs):
+        proxy.add_insult(f"Test Insult {i}")
+
+
+def run(total_requests):
+    """
+    Distribute 'total_requests' evenly across NUM_PROCESSES processes,
+    run them in parallel, and return the total elapsed time.
+    """
+    # Determine how many requests each process should send
+    per_process = total_requests // NUM_PROCESSES
+    # Build argument list for pool
+    tasks = [(SERVER_URL, per_process)] * NUM_PROCESSES
 
     start = time.time()
-
-    #Run send_requests for NUM_PROCESSES concurrently
     with multiprocessing.Pool(NUM_PROCESSES) as pool:
-        results = pool.map(send_requests, range(NUM_PROCESSES))
-
+        pool.map(send_requests, tasks)
     end = time.time()
+    return end - start
 
-    #Metrics Calculation
-    total_time = end - start
-    rps = NUM_REQUESTS / total_time
-
-    print(f"Total requests: {NUM_REQUESTS}")
-    print(f"Total time: {total_time:.2f} seconds")
-    print(f"Requests per second (RPS): {rps:.2f}")
+def main():
+    throughputs = []
+    times = []
+    
+    print("Single‑node throughput test (InsultService)")
+    print(f"Concurrency (processes): {NUM_PROCESSES}")
+    print("TotalReq | Time (s) | Throughput (req/s)")
+    
+    # Sweep over different total request loads
+    for total in REQUEST_STEPS:
+        t = run(total)
+        tp = total / t
+        times.append(t)
+        throughputs.append(tp)
+        print(f"{total:8d} | {t:8.3f} | {tp:8.1f}")
+    
+    # Plot throughput vs total requests
+    plt.figure()
+    plt.plot(REQUEST_STEPS, throughputs, marker='o')
+    plt.xscale('log')
+    plt.xlabel('Total requests issued')
+    plt.ylabel('Throughput (requests/sec)')
+    plt.title('Single‑node InsultService Throughput vs Load')
+    plt.grid(True)
+    plt.show()
 
 if __name__ == "__main__":
-    stress_test_insult_service()
+    main()
