@@ -1,35 +1,46 @@
+# InsultService.py
 import redis
 import time
+import threading
 import random
 
 class InsultService:
-    def __init__(self, redis_host='localhost', redis_port=6379):
-        self.redis = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
-        self.insult_key = "insults"
-        self.pubsub_channel = "insult_broadcast"
+    def __init__(self, host='localhost', port=6379):
+        self.redis = redis.Redis(host=host, port=port, decode_responses=True)
+        self.insults = ['stupid', 'lazy', 'ugly', 'smelly', 'dumb', 'slow']
+        self.redis.delete('INSULTS')
 
-    def add_insult(self, insult):
-        if not self.redis.sismember(self.insult_key, insult):
-            self.redis.sadd(self.insult_key, insult)
-            return f"Insult '{insult}' added."
-        return f"Insult '{insult}' already exists."
-
-    def get_insults(self):
-        return list(self.redis.smembers(self.insult_key))
+        for insult in self.insults:
+            self.redis.sadd('INSULTS', insult)
 
     def broadcast_insult(self):
         while True:
-            insults = self.get_insults()
-            if insults:
-                random_insult = random.choice(insults)
-                self.redis.publish(self.pubsub_channel, random_insult)
-                print(f"[Broadcast] Sending insult: {random_insult}")
             time.sleep(5)
+            insult = random.choice(self.insults)
+            print(f"[Service] Sending insult to filter: {insult}")
+            self.redis.lpush('insult_raw', insult)
+
+    def listen_for_new_insults(self):
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe('new_insults')
+
+        print("[Service] Listening for new insults...")
+        for message in pubsub.listen():
+            if message['type'] == 'message':
+                insult = message['data']
+                if not self.redis.sismember('INSULTS', insult):
+                    self.redis.sadd('INSULTS', insult)
+                    self.insults.append(insult)
+                    print(f"[Service] New insult added: {insult}")
 
 def main():
     service = InsultService()
+    t1 = threading.Thread(target=service.broadcast_insult, daemon=True)
+    t2 = threading.Thread(target=service.listen_for_new_insults)
 
-    service.broadcast_insult()
+    t1.start()
+    t2.start()
+    t2.join()
 
 if __name__ == "__main__":
     main()

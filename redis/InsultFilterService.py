@@ -1,25 +1,48 @@
+# InsultFilterService.py
 import redis
-
-INSULTS = ["stupid", "idiot", "dumb"]
+import threading
 
 class InsultFilterService:
-    def __init__(self, redis_host='localhost', redis_port=6379):
-        self.redis = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
-        self.filtered_key = "filtered_texts"
+    def __init__(self, host='localhost', port=6379):
+        self.redis = redis.Redis(host=host, port=port, decode_responses=True)
+        self.insults = set(self.redis.smembers('INSULTS'))
 
-    def submit_text(self, text):
-        for insult in INSULTS:
-            text = text.replace(insult, "CENSORED")
-        self.redis.rpush(self.filtered_key, text)
-        return "Text submitted for filtering."
+    def filter_text(self, text):
+        for insult in self.insults:
+            if insult in text:
+                print(f"[Filter] Found insult: {insult}")
+                text = text.replace(insult, "CENSORED")
+        return text
 
-    def get_results(self):
-        return list(self.redis.lrange(self.filtered_key, 0, -1))
+    def process_texts(self):
+        print("[Filter] Waiting for texts...")
+        while True:
+            _, text = self.redis.brpop('insult_raw')
+            filtered = self.filter_text(text)
+            print(f"[Filter] Filtered text: {filtered}")
+            self.redis.publish('filtered_insults', filtered)
+
+    def listen_for_new_insults(self):
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe('new_insults')
+
+        print("[Filter] Listening for new insults...")
+        for message in pubsub.listen():
+            if message['type'] == 'message':
+                insult = message['data']
+                if insult not in self.insults:
+                    self.insults.add(insult)
+                    print(f"[Filter] New insult added: {insult}")
 
 def main():
-    filter_service = InsultFilterService()
-    filter_service.submit_text("This is a stupid mistake.")
-    print("Filtered results:", filter_service.get_results())
+    service = InsultFilterService()
+    t1 = threading.Thread(target=service.listen_for_new_insults, daemon=True)
+    t2 = threading.Thread(target=service.process_texts)
+    
+    t1.start()
+    t2.start()
+    t2.join()
+
 
 if __name__ == "__main__":
     main()
