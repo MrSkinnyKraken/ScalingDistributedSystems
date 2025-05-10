@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 # ── Configuration ────────────────────────────────────────────────────
 SERVER_PORTS    = [9000, 9001, 9002]   # the three server nodes you have running
 HOST            = "localhost"
-TOTAL_REQUESTS  = 1600                 # keep this constant for all N
+TOTAL_REQUESTS  = 1000                 # keep this constant for all N
 NUM_PROCESSES   = 10                   # client‑side parallelism
 # ────────────────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ def measure_time(ports):
         pool.map(send_requests, tasks)
     return time.time() - t0
 
-def main():
+def main(): 
     times = []
     speedups = []
     Ns = [1, 2, 3]
