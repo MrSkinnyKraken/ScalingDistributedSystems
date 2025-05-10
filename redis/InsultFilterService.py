@@ -8,7 +8,7 @@ class InsultFilterService:
         self.insults = set(self.redis.smembers('INSULTS'))
 
     def filter_text(self, text):
-        for insult in self.insults:
+        for insult in list(self.insults):  # usar copia inmutable para eviar problemas de concurrencia con threading
             if insult in text:
                 print(f"[Filter] Found insult: {insult}")
                 text = text.replace(insult, "CENSORED")
@@ -17,7 +17,7 @@ class InsultFilterService:
     def process_texts(self):
         print("[Filter] Waiting for texts...")
         while True:
-            _, text = self.redis.brpop('insult_raw')
+            _, text = self.redis.blpop('insult_raw')
             filtered = self.filter_text(text)
             print(f"[Filter] Filtered text: {filtered}")
             self.redis.publish('filtered_insults', filtered)
