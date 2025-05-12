@@ -1,6 +1,6 @@
 import argparse
 import random
-import time
+import time, math
 import threading
 import xmlrpc.client
 from xmlrpc.server import SimpleXMLRPCServer
@@ -64,7 +64,7 @@ class FrontEnd:
         # This method is not thread-safe, but it's only for monitoring purposes.
 
 
-def worker_loop(queue: Queue, insults, subscribers):
+def worker_loop(queue: Queue, insults):
     """Worker process: consume tasks from the queue and apply them."""
     while True:
         task_type, payload = queue.get()
@@ -84,18 +84,16 @@ def autoscaler(task_queue, timestamps, workers):
         # purge timestamps older than 1s
         while timestamps and now - timestamps[0] > 1.0:
             timestamps.popleft()
-        lam = len(timestamps)  # messages in last second
+        lam = len(timestamps)  # messages in last 1s
 
-        # compute desired workers
-        N_desired = int((lam * T) / C)
-        # clamp
+        # correct formula: N = ceil(lambda / C)
+        N_desired = math.ceil(lam / C)
         N_desired = max(MIN_WORKERS, min(MAX_WORKERS, N_desired))
 
         # scale up
         while len(workers) < N_desired:
             p = Process(target=worker_loop, args=(task_queue, insults), daemon=True)
-            p.start()
-            workers.append(p)
+            p.start(); workers.append(p)
             print(f"[autoscaler] +1 worker → {len(workers)}")
 
         # scale down
@@ -105,6 +103,7 @@ def autoscaler(task_queue, timestamps, workers):
             print(f"[autoscaler] –1 worker → {len(workers)}")
 
         time.sleep(SCALE_INTERVAL)
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Dynamic‐scaling XMLRPC InsultService")
@@ -116,7 +115,7 @@ if __name__ == "__main__":
     task_queue = mgr.Queue()
     insults = mgr.list(['stupid','lazy','ugly','smelly','dumb','slow'])
     subscribers = mgr.list()
-    timestamps = mgr.list() # timestamps of incoming requests
+    #timestamps = mgr.list() # timestamps of incoming requests
 
     # convert to collections.deque for efficient pops
     timestamps = deque()
@@ -124,7 +123,7 @@ if __name__ == "__main__":
     # Start initial worker pool
     workers = []
     for _ in range(MIN_WORKERS):
-        p = Process(target=worker_loop, args=(task_queue, insults, subscribers), daemon=True)
+        p = Process(target=worker_loop, args=(task_queue, insults), daemon=True)
         p.start(); workers.append(p)
     print(f"[main] Started {MIN_WORKERS} worker(s).")
 
