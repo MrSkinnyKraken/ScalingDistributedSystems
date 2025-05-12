@@ -5,26 +5,30 @@ import threading
 import xmlrpc.client
 from xmlrpc.server import SimpleXMLRPCServer
 from multiprocessing import Manager, Process, Queue
+from collections import deque
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-MIN_WORKERS    = 1        # never drop below this many workers
-MAX_WORKERS    = 8        # never exceed this many
-HIGH_WATER     = 50       # if queue length > HIGH_WATER, scale up
-LOW_WATER      = 10       # if queue length < LOW_WATER, scale down
-CHECK_INTERVAL = 1.0      # seconds between autoscaler checks
+MIN_WORKERS    = 1        # minimum workers
+MAX_WORKERS    = 8        # maximum workers
+C              = 4.9      # measured capacity per worker (req/sec)
+T              = 1.0 / C  # average processing time per message
+SCALE_INTERVAL = 1.0      # seconds between autoscaler runs
 # ────────────────────────────────────────────────────────────────────────────────
 
 class FrontEnd:
     """XMLRPC‐exposed methods: they enqueue tasks or read shared state."""
-    def __init__(self, queue, insults, subscribers):
+    def __init__(self, queue, insults, subscribers, timestamps):
         self._queue = queue
         self._insults = insults
         self._subs = subscribers
+        self._timestamps = timestamps 
 
     def add_insult(self, insult):
         """Enqueue an add_insult task."""
-        self._queue.put(("add_insult", insult))
-        return "Insult enqueued for addition."
+        now = time.time()
+        self._timestamps.append(now)                 # record arrival
+        self._queue.put(("add_insult", insult))      # enqueue work
+        return "Insult enqueued."
 
     def get_insults(self):
         """Return the current insults list."""
@@ -53,6 +57,12 @@ class FrontEnd:
                         xmlrpc.client.ServerProxy(url, allow_none=True).notify(insult)
                     except:
                         pass
+    
+    def get_worker_count(self):
+        """Return how many worker processes are currently alive (workers list in main)."""
+        return len(workers)
+        # This method is not thread-safe, but it's only for monitoring purposes.
+
 
 def worker_loop(queue: Queue, insults, subscribers):
     """Worker process: consume tasks from the queue and apply them."""
@@ -63,21 +73,38 @@ def worker_loop(queue: Queue, insults, subscribers):
                 insults.append(payload)
         queue.task_done()
 
-def autoscaler(queue: Queue, workers):
-    """Autoscaler thread/process: adjust number of workers to queue length."""
+def autoscaler(task_queue, timestamps, workers):
+    """
+    Periodically compute λ over the last second, then:
+        N_desired = floor((λ * T) / C)
+    and spawn/kill workers to match N_desired.
+    """
     while True:
-        qlen = queue.qsize()
-        # scale up?
-        if qlen > HIGH_WATER and len(workers) < MAX_WORKERS:
-            p = Process(target=worker_loop, args=(queue, insults, subscribers), daemon=True)
-            p.start(); workers.append(p)
-            print(f"[autoscaler] scaled UP to {len(workers)} workers (qlen={qlen})")
-        # scale down?
-        elif qlen < LOW_WATER and len(workers) > MIN_WORKERS:
-            p = workers.pop()
-            p.terminate()
-            print(f"[autoscaler] scaled DOWN to {len(workers)} workers (qlen={qlen})")
-        time.sleep(CHECK_INTERVAL)
+        now = time.time()
+        # purge timestamps older than 1s
+        while timestamps and now - timestamps[0] > 1.0:
+            timestamps.popleft()
+        lam = len(timestamps)  # messages in last second
+
+        # compute desired workers
+        N_desired = int((lam * T) / C)
+        # clamp
+        N_desired = max(MIN_WORKERS, min(MAX_WORKERS, N_desired))
+
+        # scale up
+        while len(workers) < N_desired:
+            p = Process(target=worker_loop, args=(task_queue, insults), daemon=True)
+            p.start()
+            workers.append(p)
+            print(f"[autoscaler] +1 worker → {len(workers)}")
+
+        # scale down
+        while len(workers) > N_desired:
+            w = workers.pop()
+            w.terminate()
+            print(f"[autoscaler] –1 worker → {len(workers)}")
+
+        time.sleep(SCALE_INTERVAL)
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Dynamic‐scaling XMLRPC InsultService")
@@ -86,21 +113,25 @@ if __name__ == "__main__":
     args = p.parse_args()
 
     mgr = Manager()
-    queue = mgr.Queue()
+    task_queue = mgr.Queue()
     insults = mgr.list(['stupid','lazy','ugly','smelly','dumb','slow'])
     subscribers = mgr.list()
+    timestamps = mgr.list() # timestamps of incoming requests
+
+    # convert to collections.deque for efficient pops
+    timestamps = deque()
 
     # Start initial worker pool
     workers = []
     for _ in range(MIN_WORKERS):
-        p = Process(target=worker_loop, args=(queue, insults, subscribers), daemon=True)
+        p = Process(target=worker_loop, args=(task_queue, insults, subscribers), daemon=True)
         p.start(); workers.append(p)
     print(f"[main] Started {MIN_WORKERS} worker(s).")
 
     # Start autoscaler in its own thread
-    threading.Thread(target=autoscaler, args=(queue, workers), daemon=True).start()
+    threading.Thread(target=autoscaler, args=(task_queue, timestamps, workers), daemon=True).start()
 
-    frontend = FrontEnd(queue, insults, subscribers)
+    frontend = FrontEnd(task_queue, insults, subscribers, timestamps)
     # Start broadcaster thread
     #threading.Thread(target=frontend.broadcast_insult, daemon=True).start()
 
