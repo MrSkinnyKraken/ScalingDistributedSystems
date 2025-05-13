@@ -4,9 +4,11 @@ import threading
 import time
 import matplotlib.pyplot as plt
 
+# ── Configuration ─────────────────────────────────────────────────────────────
 SERVER_URL = "http://localhost:9000"
 DURATION   = 30  # seconds to run the test
 NUM_SENDERS = 20  # number of parallel sender processes
+# ───────────────────────────────────────────────────────────────────────────────
 
 def sender(stop_event, counter):
     """Continuously call add_insult() until stop_event is set."""

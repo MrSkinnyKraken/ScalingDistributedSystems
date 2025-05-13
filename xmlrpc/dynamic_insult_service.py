@@ -11,7 +11,6 @@ from collections import deque
 MIN_WORKERS    = 1        # minimum workers
 MAX_WORKERS    = 8        # maximum workers
 C              = 4.9      # measured capacity per worker (req/sec)
-T              = 1.0 / C  # average processing time per message
 SCALE_INTERVAL = 1.0      # seconds between autoscaler runs
 # ────────────────────────────────────────────────────────────────────────────────
 
@@ -76,7 +75,7 @@ def worker_loop(queue: Queue, insults):
 def autoscaler(task_queue, timestamps, workers):
     """
     Periodically compute λ over the last second, then:
-        N_desired = floor((λ * T) / C)
+        N_desired = ceil(λ / C)
     and spawn/kill workers to match N_desired.
     """
     while True:
