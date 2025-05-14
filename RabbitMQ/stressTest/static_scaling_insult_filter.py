@@ -1,3 +1,7 @@
+# static_scaling_insult_filter.py
+# for test correctly the stresstests,first purge the RabbitMQ queue
+#  http://localhost:15672 --> Queues -- > insult_raw -- > Purgue
+# ─────────────────────────────────────────────────────────────────────────
 import pika
 import subprocess
 import time
@@ -5,82 +9,88 @@ import multiprocessing
 import matplotlib.pyplot as plt
 
 # ── Configuración ─────────────────────────────────────────────────────────
-RABBIT_HOST = 'localhost'
-EXCHANGE_NAME = 'new_insults'
-NUM_PROCESSES = 10
-TOTAL_MESSAGES = 100000  # Total de mensajes a enviar
-# Número de instancias de InsultService a lanzar
-WORKER_COUNTS = [1, 2, 3]
+RABBIT_HOST     = 'localhost'
+QUEUE_NAME      = 'insult_raw'
+NUM_PROCESSES   = 10
+TOTAL_MESSAGES  = 100000
+WORKER_COUNTS   = [1, 2, 3]
 # ─────────────────────────────────────────────────────────────────────────
 
 def send_requests(reqs):
-    """Cada proceso abre su propia conexión a RabbitMQ y envía N mensajes."""
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBIT_HOST))
-    channel = connection.channel()
-    channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='fanout')
-
+    """Envia N mensajes insult_raw."""
+    conn = pika.BlockingConnection(pika.ConnectionParameters(host=RABBIT_HOST))
+    ch   = conn.channel()
     for i in range(reqs):
-        msg = f"test_insult_{i}"
-        channel.basic_publish(exchange=EXCHANGE_NAME, routing_key='', body=msg)
-
-    connection.close()
+        msg = f"stupid insult {i}"
+        ch.basic_publish(exchange='', routing_key=QUEUE_NAME, body=msg)
+    conn.close()
 
 def run_sender(total_requests):
-    """Distribuye las peticiones entre procesos y mide el tiempo total."""
-    per_process = total_requests // NUM_PROCESSES
-    tasks = [per_process] * NUM_PROCESSES
-
+    per = total_requests // NUM_PROCESSES
+    tasks = [per] * NUM_PROCESSES
     start = time.time()
     with multiprocessing.Pool(NUM_PROCESSES) as pool:
         pool.map(send_requests, tasks)
-    end = time.time()
-    return end - start
+    return time.time() - start
 
-def launch_insult_service_instances(n):
+def launch_workers(n):
     procs = []
     for _ in range(n):
-        p = subprocess.Popen(['python3', 'RabbitMQ/InsultService.py'])
+        p = subprocess.Popen(['python3', 'RabbitMQ/InsultFilterService.py'])
         procs.append(p)
     return procs
 
-def terminate_instances(procs):
+def terminate_workers(procs):
     for p in procs:
         p.terminate()
         p.wait()
 
-def main():
-    print("Static scaling test (InsultService via RabbitMQ)")
-    print(f"Total messages: {TOTAL_MESSAGES} | Sender processes: {NUM_PROCESSES}")
-    print("Workers | Time (s) | Speedup")
+def wait_until_empty():
+    conn = pika.BlockingConnection(pika.ConnectionParameters(host=RABBIT_HOST))
+    ch   = conn.channel()
+    while True:
+        q = ch.queue_declare(queue=QUEUE_NAME, passive=True)
+        if q.method.message_count == 0:
+            break
+        time.sleep(0.05)
+    conn.close()
 
-    base_time = None
+def main():
+    base = None
     times = []
     speedups = []
 
-    for n_workers in WORKER_COUNTS:
-        services = launch_insult_service_instances(n_workers)
-        time.sleep(5)  # Esperar a que se conecten
+    print("Static scaling test (InsultFilterService via RabbitMQ)")
+    print(f"Total messages: {TOTAL_MESSAGES} | Sender processes: {NUM_PROCESSES}")
+    print("Workers | Time (s) | Speedup")
 
-        t = run_sender(TOTAL_MESSAGES)
+    for n in WORKER_COUNTS:
+        # Arrancar n filtros
+        workers = launch_workers(n)
+        time.sleep(3)  # dejar que se suscriban
 
-        if base_time is None:
-            base_time = t
+        # Enviar + esperar a vaciar cola
+        start = time.time()
+        run_sender(TOTAL_MESSAGES)
+        wait_until_empty()
+        elapsed = time.time() - start
 
-        sp = base_time / t
-        times.append(t)
+        if base is None:
+            base = elapsed
+        sp = base / elapsed
+
+        print(f"{n:^7} | {elapsed:8.3f} | {sp:7.2f}")
+        times.append(elapsed)
         speedups.append(sp)
 
-        print(f"{n_workers:^7} | {t:8.3f} | {sp:7.2f}")
+        terminate_workers(workers)
+        time.sleep(1)
 
-        terminate_instances(services)
-        time.sleep(2)
-
-    # Gráfico de speedup
-    plt.figure()
-    plt.plot(WORKER_COUNTS, speedups, marker='o', linestyle='-')
-    plt.xlabel('Number of InsultService nodes')
+    # Gráfico
+    plt.plot(WORKER_COUNTS, speedups, marker='o')
+    plt.xlabel('Number of InsultFilterService nodes')
     plt.ylabel('Speedup (T1 / TN)')
-    plt.title('Static Scaling: Speedup of InsultService (RabbitMQ)')
+    plt.title('Static Scaling: Speedup of InsultFilterService (RabbitMQ)')
     plt.grid(True)
     plt.xticks(WORKER_COUNTS)
     plt.tight_layout()
