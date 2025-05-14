@@ -1,6 +1,7 @@
 # InsultFilterService.py
 import redis
 import threading
+import time
 
 class InsultFilterService:
     def __init__(self, host='localhost', port=6379):
@@ -8,7 +9,7 @@ class InsultFilterService:
         self.insults = set(self.redis.smembers('INSULTS'))
 
     def filter_text(self, text):
-        for insult in list(self.insults):  # usar copia inmutable para eviar problemas de concurrencia con threading
+        for insult in list(self.insults):  # copia inmutable
             if insult in text:
                 print(f"[Filter] Found insult: {insult}")
                 text = text.replace(insult, "CENSORED")
@@ -17,32 +18,40 @@ class InsultFilterService:
     def process_texts(self):
         print("[Filter] Waiting for texts...")
         while True:
-            _, text = self.redis.blpop('insult_raw')
-            filtered = self.filter_text(text)
-            print(f"[Filter] Filtered text: {filtered}")
-            self.redis.publish('filtered_insults', filtered)
+            try:                                            # try catch para manejar la desconexión de redis por saturacion (+1M de mensajes)
+                _, text = self.redis.blpop('insult_raw')
+                filtered = self.filter_text(text)
+                print(f"[Filter] Filtered text: {filtered}")
+                self.redis.publish('filtered_insults', filtered)
+            except redis.exceptions.ConnectionError:
+                print("[Filter] Redis connection lost. Reconnecting...")
+                time.sleep(1)
 
-    def listen_for_new_insults(self):
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe('new_insults')
-
-        print("[Filter] Listening for new insults...")
-        for message in pubsub.listen():
-            if message['type'] == 'message':
-                insult = message['data']
-                if insult not in self.insults:
-                    self.insults.add(insult)
-                    print(f"[Filter] New insult added: {insult}")
+    def process_new_insults(self):
+        print("[Service] Waiting for new insults...")
+        while True:
+            try:
+                pubsub = self.redis.pubsub()
+                pubsub.subscribe('new_insults')  # Subscribe to the 'new_insults' channel
+                for message in pubsub.listen():
+                    if message['type'] == 'message':  # Process only actual messages
+                        insult = message['data']
+                        if not self.redis.sismember('INSULTS', insult):
+                            self.redis.sadd('INSULTS', insult)
+                            self.insults.append(insult)
+                            print(f"[Service] New insult added: {insult}")
+            except redis.exceptions.ConnectionError:
+                print("[Service] Redis connection lost. Reconnecting...")
+                time.sleep(1)  # Wait before reconnecting
 
 def main():
     service = InsultFilterService()
-    t1 = threading.Thread(target=service.listen_for_new_insults, daemon=True)
+    t1 = threading.Thread(target=service.process_new_insults, daemon=True)
     t2 = threading.Thread(target=service.process_texts)
-    
+
     t1.start()
     t2.start()
     t2.join()
-
 
 if __name__ == "__main__":
     main()
