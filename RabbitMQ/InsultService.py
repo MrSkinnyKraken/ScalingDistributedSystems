@@ -11,7 +11,7 @@ class InsultService:
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.rabbit_host))
         self.channel = self.connection.channel()
 
-        self.channel.queue_declare(queue="insult_raw")
+        self.channel.queue_declare(queue="insult_raw", durable=True)
         self.channel.exchange_declare(exchange="new_insults", exchange_type="fanout")
 
     def broadcast_insult(self):

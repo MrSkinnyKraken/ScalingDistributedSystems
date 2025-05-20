@@ -7,12 +7,12 @@ import math
 # ── Configuración ─────────────────────────────────────────────────────────
 RABBIT_HOST   = 'localhost'
 QUEUE_NAME    = 'insult_raw'
-T_PROCESS     = 0.01             # tiempo medio de filtrar un mensaje (s/msg)
+T_PROCESS     = 0.001             # tiempo medio de filtrar un mensaje (s/msg)
 C_WORKER      = 1 / T_PROCESS
 T_RESPONSE    = 1.0
 MAX_WORKERS   = 100
 MIN_WORKERS   = 1
-SCALE_INTERVAL= 2
+SCALE_INTERVAL= 0.5            # intervalo de escalado (s)
 # ─────────────────────────────────────────────────────────────────────────
 
 def start_filter():
@@ -52,7 +52,7 @@ def dynamic_scale():
                 for _ in range(-delta):
                     terminate(workers.pop())
                 print(f"[Scale-Down] Terminated {-delta} workers (total {len(workers)})")
-
+            
             print(f"[Monitor] Backlog={B}, ArrivalRate≈{ArrivalRate:.1f}/s, Workers={len(workers)}")
             time.sleep(SCALE_INTERVAL)
     finally:
