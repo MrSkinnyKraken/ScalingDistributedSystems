@@ -1,7 +1,8 @@
 from xmlrpc.server import SimpleXMLRPCServer
-from xmlrpc.server import SimpleXMLRPCRequestHandler
+#from xmlrpc.server import SimpleXMLRPCRequestHandler
 import time
 import random
+import argparse
 
 class InsultService:
     def __init__(self):
@@ -55,7 +56,7 @@ class InsultService:
                     except Exception as e:
                         print(f"Failed to notify subscriber {subscriber_url}: {e}")
 
-def run_insult_service_server(host="localhost", port=9000):
+def run_insult_service_server(host: str, port: int):
     server = SimpleXMLRPCServer((host, port), logRequests=True, allow_none=True)
     service = InsultService()
     server.register_instance(service)
@@ -63,4 +64,8 @@ def run_insult_service_server(host="localhost", port=9000):
     server.serve_forever()
 
 if __name__ == "__main__":
-    run_insult_service_server()
+    p = argparse.ArgumentParser(description="Run XMLRPC InsultService")
+    p.add_argument("--host", default="localhost", help="Host to bind")
+    p.add_argument("--port", type=int, default=9000, help="Port to bind")
+    args = p.parse_args()
+    run_insult_service_server(host=args.host, port=args.port)
